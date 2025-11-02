@@ -135,10 +135,12 @@ def linkedin_login(page, email, password):
 def search_jobs(page, keywords, location, job_types, work_mode):
     """Search for Easy Apply jobs with better filtering"""
     try:
-        # Build search URL
+        # Build search URL - simpler approach, let LinkedIn filter on the page
         search_query = keywords.split(',')[0].strip().replace(' ', '%20')
         location_query = location.strip().replace(' ', '%20')
-        base_url = f'https://www.linkedin.com/jobs/search/?keywords={search_query}&location={location_query}&f_AL=true'
+        
+        # Start with basic search, Easy Apply filter, and sort by most recent
+        base_url = f'https://www.linkedin.com/jobs/search/?keywords={search_query}&location={location_query}&f_AL=true&sortBy=DD'
         
         # Add job type filters (LinkedIn filter codes)
         job_type_codes = []
@@ -160,50 +162,78 @@ def search_jobs(page, keywords, location, job_types, work_mode):
         if 'Hybrid' in work_mode:
             base_url += '&f_WT=3'
         
-        page.goto(base_url, wait_until='domcontentloaded')
-        human_delay(3, 5)
+        print(f"🔗 Navigating to job search: {base_url}")
+        page.goto(base_url, wait_until='networkidle', timeout=30000)
+        human_delay(5, 7)
+        
+        # Take screenshot for debugging
+        try:
+            page.screenshot(path='uploads/job_search_page.png')
+            print("📸 Screenshot saved: uploads/job_search_page.png")
+        except:
+            pass
         
         # Scroll to load more jobs
-        for i in range(3):
-            page.evaluate('window.scrollBy(0, 800)')
+        print("📜 Scrolling to load jobs...")
+        for i in range(5):
+            page.evaluate('window.scrollBy(0, 1000)')
             human_delay(1, 2)
         
-        # Extract job listings
+        # Wait for page to settle
+        human_delay(3, 5)
+        
+        # NEW APPROACH: Get all job links directly from the page
+        print("🔍 Extracting job URLs...")
         jobs = []
-        page.wait_for_selector('.jobs-search-results__list-item', timeout=10000)
         
-        job_cards = page.query_selector_all('.jobs-search-results__list-item')
-        print(f"Found {len(job_cards)} job cards")
+        # Get all job listing links
+        job_links = page.query_selector_all('a[href*="/jobs/view/"]')
+        print(f"Found {len(job_links)} potential job links")
         
-        for card in job_cards[:30]:
+        seen_ids = set()
+        
+        for link in job_links[:50]:  # Process more to find Easy Apply ones
             try:
-                # Click on job card to load details
-                card.click()
-                human_delay(1, 2)
+                href = link.get_attribute('href')
+                if not href:
+                    continue
                 
-                # Extract job details
-                title_elem = card.query_selector('.job-card-list__title')
-                company_elem = card.query_selector('.job-card-container__primary-description')
-                link_elem = card.query_selector('a.job-card-list__title')
+                # Extract job ID from URL
+                job_id = None
+                if '/jobs/view/' in href:
+                    job_id = href.split('/jobs/view/')[1].split('/')[0].split('?')[0]
                 
-                # Check for Easy Apply button
-                easy_apply_btn = page.query_selector('button.jobs-apply-button')
+                if not job_id or job_id in seen_ids:
+                    continue
                 
-                if title_elem and link_elem and easy_apply_btn:
-                    job_url = link_elem.get_attribute('href').split('?')[0]
+                seen_ids.add(job_id)
+                
+                # Build clean job URL
+                job_url = f"https://www.linkedin.com/jobs/view/{job_id}"
+                
+                # Try to get title from the link
+                title = link.inner_text().strip() if link.inner_text() else None
+                
+                if title and len(title) > 5:  # Valid title
                     jobs.append({
-                        'title': title_elem.inner_text().strip(),
-                        'company': company_elem.inner_text().strip() if company_elem else 'Unknown',
-                        'url': job_url
+                        'title': title,
+                        'company': 'Unknown',  # Will get this when we open the job
+                        'url': job_url,
+                        'id': job_id
                     })
+                    print(f"  ✅ Added: {title} - {job_id}")
+                
+                if len(jobs) >= 30:
+                    break
                     
             except Exception as e:
-                print(f"Error extracting job: {e}")
                 continue
         
+        print(f"\n✅ Total jobs collected: {len(jobs)}")
         return jobs
+        
     except Exception as e:
-        print(f"Search error: {e}")
+        print(f"❌ Search error: {e}")
         traceback.print_exc()
         return []
 
@@ -347,61 +377,197 @@ def smart_fill_field(page, field, answer, field_type='input'):
 def apply_to_job(page, job_url, answers, resume_path):
     """Apply to job with intelligent form filling"""
     try:
-        page.goto(job_url, wait_until='domcontentloaded')
+        print(f"\n{'='*60}")
+        print(f"🔗 Opening job: {job_url}")
+        print(f"{'='*60}")
+        
+        page.goto(job_url, wait_until='networkidle', timeout=30000)
+        human_delay(5, 7)
+        
+        # Take screenshot for debugging
+        try:
+            page.screenshot(path='uploads/job_page.png')
+            print("📸 Screenshot saved: uploads/job_page.png")
+        except:
+            pass
+        
+        # Scroll down to make sure everything loads
+        print("📜 Scrolling page...")
+        page.evaluate('window.scrollTo(0, 400)')
         human_delay(2, 3)
         
-        # Find and click Easy Apply button
+        # Look for Easy Apply button with extensive search
+        print("🔍 Searching for Easy Apply button...")
+        
         easy_apply_selectors = [
             'button.jobs-apply-button',
             'button[aria-label*="Easy Apply"]',
+            'button:text("Easy Apply")',
             'button:has-text("Easy Apply")',
-            '.jobs-apply-button'
+            '.jobs-apply-button',
+            'button[data-control-name*="jobdetails_topcard_inapply"]',
+            '.jobs-apply-button--top-card',
+            'button.artdeco-button:has-text("Easy Apply")'
         ]
         
         easy_apply_btn = None
-        for selector in easy_apply_selectors:
+        
+        for idx, selector in enumerate(easy_apply_selectors):
             try:
-                easy_apply_btn = page.wait_for_selector(selector, timeout=5000)
+                print(f"  Trying selector {idx+1}/{len(easy_apply_selectors)}: {selector}")
+                elements = page.query_selector_all(selector)
+                
+                if elements:
+                    print(f"    Found {len(elements)} element(s)")
+                    for elem in elements:
+                        try:
+                            if elem.is_visible():
+                                text = elem.inner_text().strip() if elem.inner_text() else ''
+                                print(f"    ✅ Visible element found: '{text}'")
+                                easy_apply_btn = elem
+                                break
+                        except:
+                            continue
+                
                 if easy_apply_btn:
                     break
-            except:
+                    
+            except Exception as e:
+                print(f"    Error: {e}")
                 continue
         
         if not easy_apply_btn:
-            return False, "Easy Apply button not found"
+            print("❌ Easy Apply button not found - checking if it's a regular Apply job...")
+            
+            # Check if this is a non-Easy Apply job
+            regular_apply_btns = page.query_selector_all('button:has-text("Apply")')
+            if regular_apply_btns:
+                print("⚠️  This is a regular Apply job (not Easy Apply) - skipping")
+                return False, "Not an Easy Apply job"
+            
+            # Print page content for debugging
+            print("\n📄 Page buttons found:")
+            all_buttons = page.query_selector_all('button')
+            for btn in all_buttons[:10]:  # Show first 10 buttons
+                try:
+                    if btn.is_visible():
+                        btn_text = btn.inner_text().strip()
+                        if btn_text:
+                            print(f"  - {btn_text}")
+                except:
+                    continue
+            
+            return False, "Easy Apply button not found on page"
         
-        easy_apply_btn.click()
-        human_delay(3, 4)
-        
-        # Wait for modal to open
+        # Found the button - now click it
+        print(f"\n✅ Easy Apply button found!")
         try:
-            page.wait_for_selector('.jobs-easy-apply-modal', timeout=5000)
-        except:
-            pass
+            # Scroll button into view
+            easy_apply_btn.scroll_into_view_if_needed()
+            human_delay(1, 2)
+            
+            # Highlight the button (for visual confirmation)
+            try:
+                page.evaluate("(element) => element.style.border = '3px solid red'", easy_apply_btn)
+                human_delay(0.5, 1)
+            except:
+                pass
+            
+            # Click using multiple methods
+            print("🖱️  Attempting to click Easy Apply button...")
+            
+            # Method 1: Regular click
+            try:
+                easy_apply_btn.click()
+                print("  ✅ Click method 1: Regular click successful")
+            except Exception as e:
+                print(f"  ❌ Click method 1 failed: {e}")
+                
+                # Method 2: Force click
+                try:
+                    easy_apply_btn.click(force=True)
+                    print("  ✅ Click method 2: Force click successful")
+                except Exception as e2:
+                    print(f"  ❌ Click method 2 failed: {e2}")
+                    
+                    # Method 3: JavaScript click
+                    try:
+                        page.evaluate("(element) => element.click()", easy_apply_btn)
+                        print("  ✅ Click method 3: JavaScript click successful")
+                    except Exception as e3:
+                        print(f"  ❌ Click method 3 failed: {e3}")
+                        return False, "Failed to click Easy Apply button"
+            
+            print("✅ Easy Apply button clicked!")
+            human_delay(5, 7)
+            
+        except Exception as e:
+            print(f"❌ Error clicking Easy Apply: {e}")
+            return False, f"Failed to click Easy Apply: {str(e)}"
+        
+        # Wait for modal to open - try multiple selectors
+        print("\n⏳ Waiting for application modal to open...")
+        
+        modal_selectors = [
+            '.jobs-easy-apply-modal',
+            '[role="dialog"]',
+            '.artdeco-modal',
+            '.jobs-easy-apply-content',
+            'div[data-test-modal]'
+        ]
+        
+        modal_found = False
+        for selector in modal_selectors:
+            try:
+                print(f"  Checking for: {selector}")
+                page.wait_for_selector(selector, timeout=8000)
+                print(f"  ✅ Modal found: {selector}")
+                modal_found = True
+                break
+            except:
+                print(f"  ❌ Not found: {selector}")
+                continue
+        
+        if not modal_found:
+            print("⚠️  Modal selectors not found, checking page state...")
+            # Take screenshot to see what happened
+            try:
+                page.screenshot(path='uploads/after_click.png')
+                print("📸 Screenshot saved: uploads/after_click.png")
+            except:
+                pass
         
         max_pages = 10
         current_page = 0
         
         while current_page < max_pages:
             current_page += 1
-            print(f"📄 Processing page {current_page}")
+            print(f"\n📄 Processing application page {current_page}")
             
-            human_delay(2, 3)
+            human_delay(3, 4)
             
             # Upload resume if file input exists
+            print("📎 Checking for resume upload...")
             try:
                 file_inputs = page.query_selector_all('input[type="file"]')
                 for file_input in file_inputs:
-                    if file_input.is_visible():
-                        print("📎 Uploading resume...")
-                        file_input.set_input_files(resume_path)
-                        human_delay(2, 3)
-                        break
+                    try:
+                        if file_input.is_visible():
+                            print("📎 Uploading resume...")
+                            file_input.set_input_files(resume_path)
+                            human_delay(3, 4)
+                            print("✅ Resume uploaded")
+                            break
+                    except:
+                        continue
             except Exception as e:
-                print(f"Resume upload: {e}")
+                print(f"Resume upload error: {e}")
             
             # Find all form fields on current page
-            form_fields = page.query_selector_all('input, textarea, select')
+            form_fields = page.query_selector_all('input:not([type="hidden"]), textarea, select')
+            print(f"Found {len(form_fields)} form fields")
+            
+            fields_filled = 0
             
             for field in form_fields:
                 try:
@@ -412,6 +578,7 @@ def apply_to_job(page, job_url, answers, resume_path):
                     field_id = field.get_attribute('id') or ''
                     field_name = field.get_attribute('name') or ''
                     field_label = field.get_attribute('aria-label') or ''
+                    field_placeholder = field.get_attribute('placeholder') or ''
                     field_type = field.get_attribute('type') or 'text'
                     
                     # Skip file inputs
@@ -419,114 +586,164 @@ def apply_to_job(page, job_url, answers, resume_path):
                         continue
                     
                     # Try to find matching answer
-                    field_key = (field_id + field_name + field_label).lower()
+                    field_key = (field_id + field_name + field_label + field_placeholder).lower()
                     
                     matched_answer = None
+                    matched_key = None
                     
-                    # Smart matching
-                    for key, value in answers.items():
-                        key_lower = key.lower().replace('_', '')
-                        
-                        if any(term in field_key for term in [
-                            key_lower, key.replace('_', ''), key.replace('_', '-')
-                        ]):
-                            matched_answer = value
-                            break
+                    # Smart matching with priority
+                    matching_patterns = {
+                        'email': ['email', 'e-mail', 'emailaddress'],
+                        'phone': ['phone', 'mobile', 'telephone', 'contact'],
+                        'full_name': ['fullname', 'name', 'your name'],
+                        'city': ['city', 'location', 'where'],
+                        'years_experience': ['years', 'experience', 'yoe'],
+                        'cover_letter': ['cover', 'letter', 'why', 'interested', 'motivation'],
+                        'linkedin_url': ['linkedin', 'profile'],
+                        'portfolio_url': ['website', 'portfolio', 'github'],
+                        'work_authorization': ['authorization', 'authorized', 'legal'],
+                        'require_sponsorship': ['sponsor', 'visa'],
+                        'willing_to_relocate': ['relocate', 'relocation', 'move'],
+                        'salary_expectation': ['salary', 'compensation', 'expected']
+                    }
                     
-                    # Additional field type matching
-                    if not matched_answer:
-                        if 'email' in field_key:
-                            matched_answer = answers.get('email')
-                        elif 'phone' in field_key or 'mobile' in field_key:
-                            matched_answer = answers.get('phone')
-                        elif 'name' in field_key and 'first' not in field_key and 'last' not in field_key:
-                            matched_answer = answers.get('full_name')
-                        elif 'city' in field_key or 'location' in field_key:
-                            matched_answer = answers.get('city')
-                        elif 'year' in field_key and 'experience' in field_key:
-                            matched_answer = answers.get('years_experience')
-                        elif 'cover' in field_key or 'letter' in field_key or 'why' in field_key:
-                            matched_answer = answers.get('cover_letter')
-                        elif 'linkedin' in field_key:
-                            matched_answer = answers.get('linkedin_url')
-                        elif 'website' in field_key or 'portfolio' in field_key:
-                            matched_answer = answers.get('portfolio_url')
-                        elif 'sponsor' in field_key:
-                            matched_answer = answers.get('require_sponsorship', 'No')
-                        elif 'authorization' in field_key or 'authorized' in field_key:
-                            matched_answer = answers.get('work_authorization', 'Yes')
-                        elif 'relocate' in field_key:
-                            matched_answer = answers.get('willing_to_relocate', 'Yes')
-                        elif 'salary' in field_key:
-                            matched_answer = answers.get('salary_expectation', 'Negotiable')
+                    for answer_key, patterns in matching_patterns.items():
+                        if any(pattern in field_key for pattern in patterns):
+                            if answer_key in answers:
+                                matched_answer = answers[answer_key]
+                                matched_key = answer_key
+                                break
                     
                     if matched_answer:
-                        print(f"✍️  Filling field: {field_key[:50]} = {str(matched_answer)[:50]}")
-                        smart_fill_field(page, field, matched_answer, field_type)
+                        print(f"✍️  Filling '{matched_key}': {str(matched_answer)[:30]}...")
+                        if smart_fill_field(page, field, matched_answer, field_type):
+                            fields_filled += 1
+                        else:
+                            print(f"   ⚠️  Failed to fill field")
                 
                 except Exception as e:
-                    print(f"Field error: {e}")
+                    print(f"Field processing error: {e}")
                     continue
             
+            print(f"✅ Filled {fields_filled} fields on this page")
             human_delay(2, 3)
             
-            # Try to click Next or Review button
+            # Try to click Next, Review, or Submit button
             next_clicked = False
+            
+            # First, try to find and click Next/Continue/Review buttons
             next_button_selectors = [
+                'button[aria-label*="Continue to next step"]',
                 'button[aria-label*="Continue"]',
                 'button[aria-label*="Next"]',
                 'button[aria-label*="Review"]',
                 'button:has-text("Next")',
+                'button:has-text("Continue")',
                 'button:has-text("Review")',
-                'button.artdeco-button--primary:has-text("Next")'
+                'footer button.artdeco-button--primary',
+                '.jobs-easy-apply-modal footer button[type="button"]'
             ]
             
+            print("🔍 Looking for Next/Continue button...")
             for selector in next_button_selectors:
                 try:
                     next_btn = page.query_selector(selector)
                     if next_btn and next_btn.is_visible() and next_btn.is_enabled():
-                        print(f"➡️  Clicking: {selector}")
+                        btn_text = next_btn.inner_text().strip()
+                        print(f"➡️  Found button: '{btn_text}' - clicking...")
+                        next_btn.scroll_into_view_if_needed()
+                        human_delay(0.5, 1)
                         next_btn.click()
                         next_clicked = True
-                        human_delay(3, 4)
+                        human_delay(3, 5)
+                        print(f"✅ Clicked '{btn_text}' button")
                         break
-                except:
+                except Exception as e:
+                    print(f"   Error with selector {selector}: {e}")
                     continue
             
             if not next_clicked:
+                print("🔍 No Next button found, looking for Submit button...")
+                
                 # Check for Submit button
                 submit_selectors = [
                     'button[aria-label*="Submit application"]',
                     'button[aria-label*="Submit"]',
                     'button:has-text("Submit application")',
-                    'button:has-text("Submit")'
+                    'button:has-text("Submit")',
+                    'footer button.artdeco-button--primary:has-text("Submit")',
+                    '.jobs-easy-apply-modal footer button[type="submit"]'
                 ]
                 
+                submit_found = False
                 for selector in submit_selectors:
                     try:
                         submit_btn = page.query_selector(selector)
                         if submit_btn and submit_btn.is_visible() and submit_btn.is_enabled():
-                            print("✅ Found Submit button!")
+                            btn_text = submit_btn.inner_text().strip()
+                            print(f"✅ Found Submit button: '{btn_text}'")
+                            submit_btn.scroll_into_view_if_needed()
                             human_delay(1, 2)
                             submit_btn.click()
-                            human_delay(4, 6)
+                            submit_found = True
+                            human_delay(5, 7)
+                            print("✅ Clicked Submit button!")
                             
-                            # Verify submission
-                            if page.query_selector('[data-test-modal*="success"]') or \
-                               'Your application was sent' in page.content():
-                                return True, "Application submitted successfully"
+                            # Wait a bit and check for success indicators
+                            human_delay(2, 3)
                             
-                            return True, "Application likely submitted"
-                    except:
+                            # Check for success messages
+                            success_indicators = [
+                                '[data-test-modal*="success"]',
+                                '.artdeco-inline-feedback--success',
+                                'text=Your application was sent',
+                                'text=Application submitted',
+                                'text=successfully'
+                            ]
+                            
+                            for indicator in success_indicators:
+                                try:
+                                    if page.query_selector(indicator):
+                                        print("🎉 Success indicator found!")
+                                        return True, "Application submitted successfully"
+                                except:
+                                    continue
+                            
+                            # If no explicit success message, check if modal closed
+                            try:
+                                modal_still_open = page.query_selector('.jobs-easy-apply-modal')
+                                if not modal_still_open or not modal_still_open.is_visible():
+                                    print("✅ Modal closed - likely submitted")
+                                    return True, "Application submitted (modal closed)"
+                            except:
+                                pass
+                            
+                            return True, "Application submitted"
+                    except Exception as e:
+                        print(f"   Error with submit selector {selector}: {e}")
                         continue
                 
-                # No more buttons found
+                if submit_found:
+                    break
+                
+                # No buttons found - end of flow
+                print("⚠️  No Next or Submit button found - end of application flow")
                 break
         
-        return False, "Could not complete application flow"
+        # If we got here, check final status
+        print("\n⚠️  Reached maximum pages or end of flow")
+        
+        # Final check for success
+        try:
+            if 'application' in page.url.lower() or 'success' in page.url.lower():
+                return True, "Application likely submitted (URL changed)"
+        except:
+            pass
+        
+        return False, "Could not complete application flow - no submit button found"
         
     except Exception as e:
-        print(f"Apply error: {e}")
+        print(f"❌ Apply error: {e}")
         traceback.print_exc()
         return False, str(e)
 
