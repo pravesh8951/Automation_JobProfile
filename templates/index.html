@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LinkedIn Auto-Apply System</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #0077b5 0%, #00a0dc 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            opacity: 0.9;
+            font-size: 1.1em;
+        }
+        
+        .form-section {
+            padding: 40px;
+        }
+        
+        .form-group {
+            margin-bottom: 25px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #333;
+            font-size: 0.95em;
+        }
+        
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 1em;
+            transition: all 0.3s;
+        }
+        
+        .form-group input:focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #0077b5;
+            box-shadow: 0 0 0 3px rgba(0,119,181,0.1);
+        }
+        
+        .form-group input[type="file"] {
+            padding: 10px;
+            background: #f8f9fa;
+        }
+        
+        .checkbox-group {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+        
+        .checkbox-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .checkbox-item input[type="checkbox"] {
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+        }
+        
+        .checkbox-item label {
+            margin: 0;
+            cursor: pointer;
+            font-weight: normal;
+        }
+        
+        .btn-submit {
+            background: linear-gradient(135deg, #0077b5 0%, #00a0dc 100%);
+            color: white;
+            padding: 15px 40px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1.1em;
+            font-weight: 600;
+            cursor: pointer;
+            width: 100%;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        .btn-submit:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(0,119,181,0.3);
+        }
+        
+        .btn-submit:active {
+            transform: translateY(0);
+        }
+        
+        .btn-submit:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .status-section {
+            padding: 20px 40px 40px;
+            display: none;
+        }
+        
+        .status-box {
+            background: #f8f9fa;
+            border-left: 4px solid #0077b5;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+        }
+        
+        .status-box h3 {
+            color: #0077b5;
+            margin-bottom: 10px;
+        }
+        
+        .status-message {
+            color: #666;
+            line-height: 1.6;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e0e0e0;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #0077b5, #00a0dc);
+            width: 0%;
+            transition: width 0.3s;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+        
+        .logs-section {
+            padding: 0 40px 40px;
+            display: none;
+        }
+        
+        .log-item {
+            background: white;
+            border: 1px solid #e0e0e0;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+        }
+        
+        .log-item.success {
+            border-left: 4px solid #28a745;
+        }
+        
+        .log-item.error {
+            border-left: 4px solid #dc3545;
+        }
+        
+        .log-time {
+            color: #999;
+            font-size: 0.85em;
+        }
+        
+        .section-divider {
+            height: 2px;
+            background: linear-gradient(90deg, transparent, #e0e0e0, transparent);
+            margin: 30px 0;
+        }
+        
+        .info-box {
+            background: #e3f2fd;
+            border-left: 4px solid #2196f3;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        
+        .info-box p {
+            color: #1976d2;
+            margin: 0;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🤖 LinkedIn Auto-Apply</h1>
+            <p>AI-Powered Job Application Automation</p>
+        </div>
+        
+        <div class="form-section">
+            <div class="info-box">
+                <p><strong>How it works:</strong> Upload your resume, configure your preferences, and let AI automatically apply to jobs on LinkedIn using GPT-4o intelligence.</p>
+            </div>
+            
+            <form id="applicationForm" enctype="multipart/form-data">
+                <div class="form-group">
+                    <label for="linkedinEmail">LinkedIn Email *</label>
+                    <input type="email" id="linkedinEmail" name="linkedinEmail" required 
+                           placeholder="your-email@example.com">
+                </div>
+                
+                <div class="form-group">
+                    <label for="linkedinPassword">LinkedIn Password *</label>
+                    <input type="password" id="linkedinPassword" name="linkedinPassword" required 
+                           placeholder="Your LinkedIn password">
+                </div>
+                
+                <div class="section-divider"></div>
+                
+                <div class="form-group">
+                    <label for="resume">Upload Resume (PDF) *</label>
+                    <input type="file" id="resume" name="resume" accept=".pdf" required>
+                </div>
+                
+                <div class="section-divider"></div>
+                
+                <div class="form-group">
+                    <label for="openaiKey">OpenAI API Key *</label>
+                    <input type="password" id="openaiKey" name="openaiKey" required 
+                           placeholder="sk-proj-...">
+                </div>
+                
+                <div class="form-group">
+                    <label for="googleSheetId">Google Sheet ID (for logging) *</label>
+                    <input type="text" id="googleSheetId" name="googleSheetId" required 
+                           placeholder="1ABC123XYZ456...">
+                </div>
+                
+                <div class="section-divider"></div>
+                
+                <div class="form-group">
+                    <label for="jobKeywords">Job Keywords *</label>
+                    <input type="text" id="jobKeywords" name="jobKeywords" required 
+                           placeholder="Software Engineer, Full Stack Developer, Backend" 
+                           value="Software Engineer, Full Stack Developer">
+                </div>
+                
+                <div class="form-group">
+                    <label for="location">Location *</label>
+                    <input type="text" id="location" name="location" required 
+                           placeholder="Remote, Bengaluru, New York" value="Remote">
+                </div>
+                
+                <div class="form-group">
+                    <label>Job Types *</label>
+                    <div class="checkbox-group">
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="fullTime" name="jobTypes" value="Full-time" checked>
+                            <label for="fullTime">Full-time</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="partTime" name="jobTypes" value="Part-time">
+                            <label for="partTime">Part-time</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="contract" name="jobTypes" value="Contract">
+                            <label for="contract">Contract</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="internship" name="jobTypes" value="Internship" checked>
+                            <label for="internship">Internship</label>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label>Work Mode *</label>
+                    <div class="checkbox-group">
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="remote" name="workMode" value="Remote" checked>
+                            <label for="remote">Remote</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="onsite" name="workMode" value="On-site">
+                            <label for="onsite">On-site</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="hybrid" name="workMode" value="Hybrid" checked>
+                            <label for="hybrid">Hybrid</label>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="maxApplications">Maximum Applications Per Run</label>
+                    <input type="number" id="maxApplications" name="maxApplications" 
+                           min="1" max="50" value="20">
+                </div>
+                
+                <button type="submit" class="btn-submit" id="submitBtn">
+                    🚀 Start Auto-Applying
+                </button>
+            </form>
+        </div>
+        
+        <div class="status-section" id="statusSection">
+            <div class="status-box">
+                <h3>Status</h3>
+                <div class="status-message" id="statusMessage">Initializing...</div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressBar"></div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="logs-section" id="logsSection">
+            <h3 style="margin-bottom: 15px; color: #333;">Application Logs</h3>
+            <div id="logsContainer"></div>
+        </div>
+    </div>
+    
+    <script>
+        const form = document.getElementById('applicationForm');
+        const submitBtn = document.getElementById('submitBtn');
+        const statusSection = document.getElementById('statusSection');
+        const logsSection = document.getElementById('logsSection');
+        const statusMessage = document.getElementById('statusMessage');
+        const progressBar = document.getElementById('progressBar');
+        const logsContainer = document.getElementById('logsContainer');
+        
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const formData = new FormData(form);
+            
+            // Collect checkboxes
+            const jobTypes = Array.from(document.querySelectorAll('input[name="jobTypes"]:checked'))
+                .map(cb => cb.value);
+            const workMode = Array.from(document.querySelectorAll('input[name="workMode"]:checked'))
+                .map(cb => cb.value);
+            
+            formData.delete('jobTypes');
+            formData.delete('workMode');
+            formData.append('jobTypes', JSON.stringify(jobTypes));
+            formData.append('workMode', JSON.stringify(workMode));
+            
+            // Show status
+            statusSection.style.display = 'block';
+            logsSection.style.display = 'block';
+            submitBtn.disabled = true;
+            submitBtn.textContent = '⏳ Processing...';
+            
+            try {
+                const response = await fetch('/start-application', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    // Poll for updates
+                    pollStatus();
+                } else {
+                    statusMessage.textContent = 'Error: ' + result.error;
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = '🚀 Start Auto-Applying';
+                }
+            } catch (error) {
+                statusMessage.textContent = 'Error: ' + error.message;
+                submitBtn.disabled = false;
+                submitBtn.textContent = '🚀 Start Auto-Applying';
+            }
+        });
+        
+        async function pollStatus() {
+            try {
+                const response = await fetch('/status');
+                const data = await response.json();
+                
+                statusMessage.textContent = data.message;
+                progressBar.style.width = data.progress + '%';
+                
+                // Add logs
+                if (data.logs && data.logs.length > 0) {
+                    data.logs.forEach(log => {
+                        const logItem = document.createElement('div');
+                        logItem.className = 'log-item ' + (log.success ? 'success' : 'error');
+                        logItem.innerHTML = `
+                            <div class="log-time">${log.time}</div>
+                            <div>${log.message}</div>
+                        `;
+                        logsContainer.insertBefore(logItem, logsContainer.firstChild);
+                    });
+                }
+                
+                if (data.status === 'running') {
+                    setTimeout(pollStatus, 2000);
+                } else {
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = '🚀 Start Auto-Applying';
+                    progressBar.style.width = '100%';
+                }
+            } catch (error) {
+                console.error('Polling error:', error);
+            }
+        }
+    </script>
+</body>
+</html>
