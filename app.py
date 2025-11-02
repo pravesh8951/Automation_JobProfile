@@ -1,7 +1,6 @@
 """
 Enhanced LinkedIn Auto-Apply System with Gemini AI
-- Server-side Gemini API conf
-iguration
+- Server-side Gemini API configuration
 - Optional Google Sheets logging
 - Better form field detection
 - Human-like automation
@@ -577,7 +576,27 @@ def log_to_google_sheets(sheet_id, job_data):
 @app.route('/')
 def index():
     """Serve the HTML interface"""
-    return send_from_directory('.', 'index.html')
+    try:
+        # First try templates folder (Flask default)
+        if os.path.exists('templates/index.html'):
+            return render_template('index.html')
+        # Then try current directory
+        elif os.path.exists('index.html'):
+            with open('index.html', 'r', encoding='utf-8') as f:
+                return f.read()
+        else:
+            return """
+            <h1>Error: index.html not found</h1>
+            <p>Please create index.html in one of these locations:</p>
+            <ul>
+                <li>templates/index.html (recommended)</li>
+                <li>index.html (same folder as app.py)</li>
+            </ul>
+            <p>Current directory: {}</p>
+            <p>Files in directory: {}</p>
+            """.format(os.getcwd(), ', '.join(os.listdir('.')))
+    except Exception as e:
+        return f"Error loading index.html: {str(e)}"
 
 
 @app.route('/start-application', methods=['POST'])
