@@ -63,8 +63,8 @@ application_status = {
 }
 
 
-def human_delay(min_sec=2, max_sec=5):
-    """Add random human-like delay"""
+def human_delay(min_sec=1, max_sec=2):
+    """Add random human-like delay - optimized for speed"""
     time.sleep(random.uniform(min_sec, max_sec))
 
 
@@ -244,7 +244,7 @@ def get_gemini_answers(resume_text, job_title, company, job_description):
         if not GEMINI_API_KEY:
             return {"error": "Gemini API key not configured"}
         
-        model = genai.GenerativeModel('gemini-pro')
+        model = genai.GenerativeModel('gemini-2.5-flash')
         
         prompt = f"""You are a job application assistant. Based on the resume below, extract and provide information for a LinkedIn Easy Apply job application.
 
@@ -322,59 +322,65 @@ Example output:
 
 
 def smart_fill_field(page, field, answer, field_type='input'):
-    """Intelligently fill form field with appropriate method"""
+    """Intelligently fill form field - only if empty"""
     try:
         if not field or not answer:
             return False
         
+        # Check if field already has a value - DON'T OVERWRITE
+        try:
+            current_value = field.input_value() if field_type not in ['select', 'radio', 'checkbox'] else None
+            if current_value and len(str(current_value).strip()) > 0:
+                print(f"   ⏭️  Field already has value: '{current_value[:30]}' - skipping")
+                return True  # Return True since field is already filled
+        except:
+            pass  # If we can't get value, proceed with filling
+        
         # Scroll field into view
         field.scroll_into_view_if_needed()
-        human_delay(0.3, 0.5)
+        human_delay(0.2, 0.4)
         
         if field_type == 'select' or field.evaluate('el => el.tagName').lower() == 'select':
             # Handle dropdowns
             try:
-                # Try selecting by value
                 field.select_option(value=str(answer))
             except:
                 try:
-                    # Try selecting by label
                     field.select_option(label=str(answer))
                 except:
-                    # Just select first option if nothing works
                     options = field.query_selector_all('option')
                     if options and len(options) > 1:
                         field.select_option(index=1)
         
         elif field_type == 'radio' or field.get_attribute('type') == 'radio':
-            field.check()
+            if not field.is_checked():
+                field.check()
         
         elif field_type == 'checkbox' or field.get_attribute('type') == 'checkbox':
-            if str(answer).lower() in ['yes', 'true', '1']:
+            should_check = str(answer).lower() in ['yes', 'true', '1']
+            if should_check and not field.is_checked():
                 field.check()
         
         else:
-            # Regular input/textarea
+            # Regular input/textarea - DON'T clear if already has value
             field.click()
-            human_delay(0.2, 0.4)
-            field.fill('')  # Clear first
             human_delay(0.1, 0.2)
             
-            # Type with human-like speed
-            text = str(answer)[:500]  # Limit length
+            # Type with human-like speed but faster
+            text = str(answer)[:500]
             for char in text:
                 field.type(char)
-                time.sleep(random.uniform(0.02, 0.08))
+                time.sleep(random.uniform(0.01, 0.03))  # Faster typing
         
-        human_delay(0.3, 0.6)
+        human_delay(0.2, 0.3)
         return True
         
     except Exception as e:
-        print(f"Error filling field: {e}")
+        print(f"   Error filling field: {e}")
         return False
 
 
-def apply_to_job(page, job_url, answers, resume_path):
+def apply_to_job(page, job_url, answers, resume_path, resume_text):
     """Apply to job with intelligent form filling"""
     try:
         print(f"\n{'='*60}")
@@ -382,7 +388,7 @@ def apply_to_job(page, job_url, answers, resume_path):
         print(f"{'='*60}")
         
         page.goto(job_url, wait_until='networkidle', timeout=30000)
-        human_delay(5, 7)
+        human_delay(3, 4)
         
         # Take screenshot for debugging
         try:
@@ -499,7 +505,7 @@ def apply_to_job(page, job_url, answers, resume_path):
                         return False, "Failed to click Easy Apply button"
             
             print("✅ Easy Apply button clicked!")
-            human_delay(5, 7)
+            human_delay(3, 4)
             
         except Exception as e:
             print(f"❌ Error clicking Easy Apply: {e}")
@@ -549,17 +555,62 @@ def apply_to_job(page, job_url, answers, resume_path):
             # Upload resume if file input exists
             print("📎 Checking for resume upload...")
             try:
+                # DON'T click upload buttons - they open file dialog
+                # Directly set file on hidden input elements
+                
                 file_inputs = page.query_selector_all('input[type="file"]')
-                for file_input in file_inputs:
+                print(f"   Found {len(file_inputs)} file input(s)")
+                
+                upload_success = False
+                for idx, file_input in enumerate(file_inputs):
                     try:
-                        if file_input.is_visible():
-                            print("📎 Uploading resume...")
-                            file_input.set_input_files(resume_path)
-                            human_delay(3, 4)
-                            print("✅ Resume uploaded")
+                        print(f"   Uploading to input {idx + 1}...")
+                        
+                        # Directly set the file without clicking anything
+                        file_input.set_input_files(resume_path)
+                        human_delay(1, 2)
+                        
+                        # Verify upload by checking for success indicators
+                        time.sleep(1)
+                        
+                        # Look for filename or success message in page
+                        resume_filename = os.path.basename(resume_path)
+                        
+                        # Check multiple indicators
+                        success_indicators = [
+                            f'text={resume_filename}',
+                            'text=Resume',
+                            'text=Uploaded',
+                            '.artdeco-inline-feedback--success',
+                            '[data-test-file-upload-success]'
+                        ]
+                        
+                        for indicator in success_indicators:
+                            try:
+                                if page.query_selector(indicator):
+                                    print(f"   ✅ Resume uploaded! Found indicator: {indicator}")
+                                    upload_success = True
+                                    break
+                            except:
+                                continue
+                        
+                        if upload_success:
                             break
-                    except:
+                            
+                        # If no indicator found but no error, consider it success
+                        print(f"   ✅ Resume file set on input {idx + 1}")
+                        upload_success = True
+                        break
+                        
+                    except Exception as e:
+                        print(f"   ❌ Upload failed on input {idx + 1}: {e}")
                         continue
+                
+                if not upload_success and len(file_inputs) > 0:
+                    print("   ⚠️  Resume upload uncertain, continuing...")
+                elif len(file_inputs) == 0:
+                    print("   ℹ️  No file upload field on this page")
+                    
             except Exception as e:
                 print(f"Resume upload error: {e}")
             
@@ -585,7 +636,16 @@ def apply_to_job(page, job_url, answers, resume_path):
                     if field_type == 'file':
                         continue
                     
-                    # Try to find matching answer
+                    # Check if field already has value - skip if filled
+                    try:
+                        if field_type not in ['radio', 'checkbox', 'select']:
+                            current_value = field.input_value()
+                            if current_value and len(str(current_value).strip()) > 0:
+                                continue  # Skip already filled fields
+                    except:
+                        pass
+                    
+                    # Combine all field identifiers for matching
                     field_key = (field_id + field_name + field_label + field_placeholder).lower()
                     
                     matched_answer = None
@@ -607,6 +667,7 @@ def apply_to_job(page, job_url, answers, resume_path):
                         'salary_expectation': ['salary', 'compensation', 'expected']
                     }
                     
+                    # Try pattern matching first
                     for answer_key, patterns in matching_patterns.items():
                         if any(pattern in field_key for pattern in patterns):
                             if answer_key in answers:
@@ -614,19 +675,42 @@ def apply_to_job(page, job_url, answers, resume_path):
                                 matched_key = answer_key
                                 break
                     
+                    # If no match found, use AI to answer the question
+                    if not matched_answer:
+                        question_text = field_label or field_placeholder or field_name or field_id
+                        
+                        if question_text and len(question_text) > 2:
+                            print(f"❓ Unknown field: '{question_text[:50]}'")
+                            print(f"   🤖 Asking AI for answer...")
+                            
+                            # Use AI to answer
+                            ai_answer = answer_unknown_question_with_ai(
+                                question_text, 
+                                resume_text, 
+                                field_type
+                            )
+                            
+                            if ai_answer:
+                                matched_answer = ai_answer
+                                matched_key = 'ai_generated'
+                    
                     if matched_answer:
-                        print(f"✍️  Filling '{matched_key}': {str(matched_answer)[:30]}...")
+                        if matched_key == 'ai_generated':
+                            print(f"✍️  Filling (AI): '{str(matched_answer)[:30]}'")
+                        else:
+                            print(f"✍️  Filling '{matched_key}': '{str(matched_answer)[:30]}'")
+                        
                         if smart_fill_field(page, field, matched_answer, field_type):
                             fields_filled += 1
-                        else:
-                            print(f"   ⚠️  Failed to fill field")
+                    else:
+                        print(f"⏭️  Skipping field: {field_key[:40]}")
                 
                 except Exception as e:
-                    print(f"Field processing error: {e}")
+                    print(f"Field error: {e}")
                     continue
             
             print(f"✅ Filled {fields_filled} fields on this page")
-            human_delay(2, 3)
+            human_delay(1, 2)
             
             # Try to click Next, Review, or Submit button
             next_clicked = False
@@ -655,7 +739,7 @@ def apply_to_job(page, job_url, answers, resume_path):
                         human_delay(0.5, 1)
                         next_btn.click()
                         next_clicked = True
-                        human_delay(3, 5)
+                        human_delay(2, 3)
                         print(f"✅ Clicked '{btn_text}' button")
                         break
                 except Exception as e:
@@ -686,7 +770,7 @@ def apply_to_job(page, job_url, answers, resume_path):
                             human_delay(1, 2)
                             submit_btn.click()
                             submit_found = True
-                            human_delay(5, 7)
+                            human_delay(3, 4)
                             print("✅ Clicked Submit button!")
                             
                             # Wait a bit and check for success indicators
@@ -946,7 +1030,7 @@ def run_automation(email, password, resume_path, resume_text, sheet_id,
                         continue
                     
                     # Apply to job
-                    success, msg = apply_to_job(page, job['url'], answers, resume_path)
+                    success, msg = apply_to_job(page, job['url'], answers, resume_path, resume_text)
                     
                     # Log to Google Sheets if sheet_id provided
                     if sheet_id:
