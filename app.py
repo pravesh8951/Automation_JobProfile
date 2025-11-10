@@ -140,7 +140,9 @@ def search_jobs(page, keywords, location, job_types, work_mode):
         location_query = location.strip().replace(' ', '%20')
         
         # Start with basic search, Easy Apply filter, and sort by most recent
-        base_url = f'https://www.linkedin.com/jobs/search/?keywords={search_query}&location={location_query}&f_AL=true&sortBy=DD'
+        # f_TPR=r86400 means posted in last 24 hours
+        # f_TPR=r604800 means posted in last week
+        base_url = f'https://www.linkedin.com/jobs/search/?keywords={search_query}&location={location_query}&f_AL=true&sortBy=DD&f_TPR=r604800'
         
         # Add job type filters (LinkedIn filter codes)
         job_type_codes = []
@@ -353,8 +355,29 @@ def smart_fill_field(page, field, answer, field_type='input'):
                         field.select_option(index=1)
         
         elif field_type == 'radio' or field.get_attribute('type') == 'radio':
-            if not field.is_checked():
-                field.check()
+            # For radio buttons, check if the label/value matches the answer
+            try:
+                radio_value = field.get_attribute('value') or ''
+                radio_label = field.get_attribute('aria-label') or ''
+                radio_id = field.get_attribute('id') or ''
+                
+                # Check if this radio button matches the answer
+                answer_lower = str(answer).lower()
+                radio_text = (radio_value + radio_label + radio_id).lower()
+                
+                # Match if answer is in radio text or vice versa
+                if (answer_lower in radio_text or 
+                    radio_text in answer_lower or
+                    answer_lower == radio_value.lower()):
+                    if not field.is_checked():
+                        print(f"      Selecting radio option: {radio_value or radio_label}")
+                        field.check()
+                        return True
+            except Exception as e:
+                # Fallback: just check it if types match
+                if not field.is_checked():
+                    field.check()
+                    return True
         
         elif field_type == 'checkbox' or field.get_attribute('type') == 'checkbox':
             should_check = str(answer).lower() in ['yes', 'true', '1']
@@ -380,12 +403,13 @@ def smart_fill_field(page, field, answer, field_type='input'):
         return False
 
 
-def apply_to_job(page, job_url, answers, resume_path, resume_text):
+def apply_to_job(page, job_url, answers, resume_path, resume_text, years_experience):
     """Apply to job with intelligent form filling"""
     try:
         print(f"\n{'='*60}")
         print(f"🔗 Opening job: {job_url}")
         print(f"{'='*60}")
+        print(f"💼 Using {years_experience} years of experience for this application")
         
         page.goto(job_url, wait_until='networkidle', timeout=30000)
         human_delay(3, 4)
@@ -619,6 +643,7 @@ def apply_to_job(page, job_url, answers, resume_path, resume_text):
             print(f"Found {len(form_fields)} form fields")
             
             fields_filled = 0
+            processed_radio_groups = set()  # Track processed radio button groups
             
             for field in form_fields:
                 try:
@@ -635,6 +660,13 @@ def apply_to_job(page, job_url, answers, resume_path, resume_text):
                     # Skip file inputs
                     if field_type == 'file':
                         continue
+                    
+                    # For radio buttons, handle as group (skip if already processed)
+                    if field_type == 'radio':
+                        radio_name = field_name
+                        if radio_name in processed_radio_groups:
+                            continue  # Already processed this radio group
+                        processed_radio_groups.add(radio_name)
                     
                     # Check if field already has value - skip if filled
                     try:
@@ -683,16 +715,63 @@ def apply_to_job(page, job_url, answers, resume_path, resume_text):
                             print(f"❓ Unknown field: '{question_text[:50]}'")
                             print(f"   🤖 Asking AI for answer...")
                             
-                            # Use AI to answer
+                            # Use AI to answer with experience context
                             ai_answer = answer_unknown_question_with_ai(
                                 question_text, 
                                 resume_text, 
-                                field_type
+                                field_type,
+                                years_experience
                             )
                             
                             if ai_answer:
                                 matched_answer = ai_answer
                                 matched_key = 'ai_generated'
+                    
+                    # For radio buttons, find and click the matching option
+                    if matched_answer and field_type == 'radio':
+                        print(f"🔘 Radio group: {field_name[:40]}")
+                        print(f"   Looking for option matching: '{matched_answer}'")
+                        
+                        # Get all radio buttons in this group
+                        radio_group = page.query_selector_all(f'input[type="radio"][name="{field_name}"]')
+                        
+                        matched_radio = False
+                        for radio in radio_group:
+                            try:
+                                if not radio.is_visible():
+                                    continue
+                                
+                                radio_value = radio.get_attribute('value') or ''
+                                radio_label_for = radio.get_attribute('id') or ''
+                                
+                                # Try to get associated label text
+                                radio_label_text = ''
+                                if radio_label_for:
+                                    label_elem = page.query_selector(f'label[for="{radio_label_for}"]')
+                                    if label_elem:
+                                        radio_label_text = label_elem.inner_text().strip()
+                                
+                                # Check if this radio matches the answer
+                                answer_lower = str(matched_answer).lower()
+                                radio_text = (radio_value + radio_label_text).lower()
+                                
+                                if (answer_lower in radio_text or 
+                                    radio_text in answer_lower or
+                                    answer_lower == radio_value.lower()):
+                                    
+                                    print(f"   ✅ Selecting: '{radio_label_text or radio_value}'")
+                                    radio.check()
+                                    matched_radio = True
+                                    fields_filled += 1
+                                    break
+                                    
+                            except Exception as e:
+                                continue
+                        
+                        if not matched_radio:
+                            print(f"   ⚠️  No matching radio option found")
+                        
+                        continue  # Move to next field
                     
                     if matched_answer:
                         if matched_key == 'ai_generated':
@@ -913,6 +992,7 @@ def start_application():
         google_sheet_id = request.form.get('googleSheetId', '').strip()  # Optional
         job_keywords = request.form.get('jobKeywords')
         location = request.form.get('location')
+        years_experience = request.form.get('yearsExperience', '2')  # Get experience from form
         job_types = json.loads(request.form.get('jobTypes', '[]'))
         work_mode = json.loads(request.form.get('workMode', '[]'))
         max_applications = int(request.form.get('maxApplications', 20))
@@ -945,7 +1025,8 @@ def start_application():
         thread = threading.Thread(
             target=run_automation,
             args=(linkedin_email, linkedin_password, resume_path, resume_text, 
-                  google_sheet_id, job_keywords, location, job_types, work_mode, max_applications)
+                  google_sheet_id, job_keywords, location, years_experience,
+                  job_types, work_mode, max_applications)
         )
         thread.daemon = True
         thread.start()
@@ -958,7 +1039,7 @@ def start_application():
 
 
 def run_automation(email, password, resume_path, resume_text, sheet_id,
-                   keywords, location, job_types, work_mode, max_apps):
+                   keywords, location, years_experience, job_types, work_mode, max_apps):
     """Main automation logic"""
     global application_status
     
@@ -1030,7 +1111,7 @@ def run_automation(email, password, resume_path, resume_text, sheet_id,
                         continue
                     
                     # Apply to job
-                    success, msg = apply_to_job(page, job['url'], answers, resume_path, resume_text)
+                    success, msg = apply_to_job(page, job['url'], answers, resume_path, resume_text, years_experience)
                     
                     # Log to Google Sheets if sheet_id provided
                     if sheet_id:
@@ -1057,7 +1138,7 @@ def run_automation(email, password, resume_path, resume_text, sheet_id,
                         })
                     
                     # Random delay between applications
-                    human_delay(8, 15)
+                    human_delay(5, 8)
                     
                 except Exception as e:
                     application_status['logs'].append({
